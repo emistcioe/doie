@@ -1,4 +1,5 @@
 name: Deploy TCIOE Department to VPS
+
 on:
   push:
     branches: [main]
@@ -7,12 +8,18 @@ jobs:
   deploy:
     name: Build & Deploy to VPS
     runs-on: [self-hosted, club]
+
     env:
+      NEXT_PUBLIC_USE_PROXY: ${{ secrets.NEXT_PUBLIC_USE_PROXY }}
       NEXT_PUBLIC_API_BASE: ${{ secrets.NEXT_PUBLIC_API_BASE }}
       NEXT_PUBLIC_API_PUBLIC_PREFIX: ${{ secrets.NEXT_PUBLIC_API_PUBLIC_PREFIX }}
       NEXT_PUBLIC_API_NOTICE_PUBLIC_PREFIX: ${{ secrets.NEXT_PUBLIC_API_NOTICE_PUBLIC_PREFIX }}
-      NEXT_PUBLIC_USE_PROXY: ${{ secrets.NEXT_PUBLIC_USE_PROXY }}
+      NEXT_PUBLIC_API_RESEARCH_PUBLIC_PREFIX: ${{ secrets.NEXT_PUBLIC_API_RESEARCH_PUBLIC_PREFIX }}
+      NEXT_PUBLIC_API_PROJECT_PUBLIC_PREFIX: ${{ secrets.NEXT_PUBLIC_API_PROJECT_PUBLIC_PREFIX }}
+      NEXT_PUBLIC_API_JOURNAL_PUBLIC_PREFIX: ${{ secrets.NEXT_PUBLIC_API_JOURNAL_PUBLIC_PREFIX }}
+
       NEXT_PUBLIC_DEPARTMENT: ${{ secrets.NEXT_PUBLIC_DEPARTMENT }}
+      NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL }}
 
     steps:
       - name: Checkout Repository
