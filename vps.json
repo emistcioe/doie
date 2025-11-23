@@ -1,9 +1,9 @@
 {
-  "name": "doce",
+  "name": "doie",
   "type": "node",
-  "path": "/srv/apps/doce",
+  "path": "/srv/apps/doie",
   "port": 3017,
-  "domain": "doce.edu.np",
+  "domain": "doie.edu.np",
   "build": "pnpm install && pnpm build",
   "start": "pnpm start"
 }
