@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { DEPARTMENT_CODE } from "@/lib/env";
 import { departmentSlugFromCode } from "@/lib/department";
 import { getDepartment } from "@/lib/data/publicDepartment";
@@ -103,7 +104,9 @@ export default async function SubmitProjectPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <ProjectSubmissionForm department={dept} />
+              <Suspense fallback={<div className="py-8 text-center text-muted-foreground">Loading form...</div>}>
+                <ProjectSubmissionForm department={dept} />
+              </Suspense>
             </CardContent>
           </Card>
 
