@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import type { DepartmentDetail } from "@/lib/types/department";
 import { Input } from "@/components/ui/input";
@@ -16,8 +17,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { useSubmissionOtp } from "@/hooks/use-submission-otp";
 import { PROJECT_TYPES } from "./constants";
+import { CheckCircle2 } from "lucide-react";
 
 interface ProjectMemberForm {
   fullName: string;
@@ -80,54 +81,99 @@ export function ProjectSubmissionForm({ department }: Props) {
   } = form;
   const { fields, append, remove } = useFieldArray({ control, name: "members" });
   const { toast } = useToast();
-  const otp = useSubmissionOtp("project_submission");
-  const [otpCode, setOtpCode] = useState("");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  
+  const [isVerified, setIsVerified] = useState(false);
+  const [verificationData, setVerificationData] = useState<{
+    email: string;
+    sessionId: string;
+  } | null>(null);
+  const [sendingOtp, setSendingOtp] = useState(false);
 
   const submittedEmail = watch("submittedByEmail");
   const submittedName = watch("submittedByName");
 
+  // Check for verification completion on mount and when returning from verification page
   useEffect(() => {
-    otp.reset();
-    setOtpCode("");
-  }, [submittedEmail, otp]);
+    const verified = searchParams.get("verified");
+    if (verified === "true") {
+      const stored = sessionStorage.getItem("verification_complete");
+      if (stored) {
+        try {
+          const data = JSON.parse(stored);
+          if (data.purpose === "project_submission" && Date.now() - data.verifiedAt < 30 * 60 * 1000) {
+            setIsVerified(true);
+            setVerificationData({ email: data.email, sessionId: data.sessionId });
+            form.setValue("submittedByEmail", data.email);
+            toast({ description: "Email verified successfully!" });
+          }
+        } catch (e) {
+          console.error("Failed to parse verification data", e);
+        }
+      }
+    }
+  }, [searchParams, form, toast]);
+
+  // Reset verification when email changes
+  useEffect(() => {
+    if (verificationData && submittedEmail !== verificationData.email) {
+      setIsVerified(false);
+      setVerificationData(null);
+      sessionStorage.removeItem("verification_complete");
+    }
+  }, [submittedEmail, verificationData]);
 
   const memberLabel = useMemo(() => (index: number) => `Team member ${index + 1}`, []);
 
-  const handleRequestOtp = async () => {
+  const handleSendVerification = async () => {
     if (!submittedEmail || !submittedName) {
       toast({ description: "Enter your name and campus email first", variant: "destructive" });
       return;
     }
-    try {
-      await otp.requestOtp({ email: submittedEmail.trim(), fullName: submittedName.trim() });
-      toast({ description: "Verification code sent. Check your inbox." });
-    } catch (error) {
-      toast({
-        description:
-          error instanceof Error ? error.message : "Unable to send verification code",
-        variant: "destructive",
-      });
-    }
-  };
 
-  const handleVerifyOtp = async () => {
-    if (!otpCode) {
-      toast({ description: "Enter the OTP from your email", variant: "destructive" });
-      return;
-    }
+    setSendingOtp(true);
     try {
-      await otp.verifyOtp({ email: submittedEmail.trim(), code: otpCode.trim() });
-      toast({ description: "Email verified successfully" });
+      const response = await fetch("/api/submissions/otp/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          email: submittedEmail.trim(), 
+          full_name: submittedName.trim(), 
+          purpose: "project_submission" 
+        }),
+      });
+      
+      const data = await response.json().catch(() => ({}));
+      
+      if (!response.ok) {
+        throw new Error(data?.detail || data?.error || "Unable to send verification code");
+      }
+
+      const sessionId = data.session_id || data.sessionId;
+      
+      // Redirect to verification page
+      const params = new URLSearchParams({
+        email: submittedEmail.trim(),
+        name: submittedName.trim(),
+        type: "project",
+        session: sessionId,
+      });
+      
+      router.push(`/verification?${params.toString()}`);
+      
     } catch (error) {
       toast({
-        description: error instanceof Error ? error.message : "Unable to verify the code",
+        description: error instanceof Error ? error.message : "Unable to send verification code",
         variant: "destructive",
       });
+    } finally {
+      setSendingOtp(false);
     }
   };
 
   const onSubmit = async (values: ProjectFormValues) => {
-    if (otp.status !== "verified" || !otp.sessionId) {
+    if (!isVerified || !verificationData?.sessionId) {
       toast({ description: "Verify your campus email before submitting", variant: "destructive" });
       return;
     }
@@ -160,10 +206,10 @@ export function ProjectSubmissionForm({ department }: Props) {
       demo_url: values.demoUrl.trim() || undefined,
       technologies_used: values.technologiesUsed.trim() || undefined,
       submitted_by_name: values.submittedByName.trim(),
-      submitted_by_email: submittedEmail.trim(),
+      submitted_by_email: verificationData.email,
       department: department.uuid,
       members,
-      otp_session: otp.sessionId,
+      otp_session: verificationData.sessionId,
     };
 
     try {
@@ -179,8 +225,9 @@ export function ProjectSubmissionForm({ department }: Props) {
       }
       toast({ description: "Project submitted for review" });
       reset(defaultValues);
-      otp.reset();
-      setOtpCode("");
+      setIsVerified(false);
+      setVerificationData(null);
+      sessionStorage.removeItem("verification_complete");
     } catch (error) {
       toast({
         description: error instanceof Error ? error.message : "Failed to submit project",
@@ -332,14 +379,15 @@ export function ProjectSubmissionForm({ department }: Props) {
         </Button>
       </div>
 
-      <div className="space-y-4 border rounded-lg p-4 bg-primary-blue/5">
-        <h3 className="font-semibold text-slate-900">Campus email verification</h3>
+      <div className="space-y-4 border rounded-lg p-4 bg-muted/50">
+        <h3 className="font-semibold">Campus email verification</h3>
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-1">
             <Label htmlFor="submittedByName">Your full name</Label>
             <Input
               id="submittedByName"
               placeholder="Submitter name"
+              disabled={isVerified}
               {...register("submittedByName", { required: "Your name is required" })}
             />
             {errors.submittedByName && (
@@ -352,6 +400,7 @@ export function ProjectSubmissionForm({ department }: Props) {
               id="submittedByEmail"
               type="email"
               placeholder="name@tcioe.edu.np"
+              disabled={isVerified}
               {...register("submittedByEmail", { required: "Campus email is required" })}
             />
             {errors.submittedByEmail && (
@@ -359,37 +408,26 @@ export function ProjectSubmissionForm({ department }: Props) {
             )}
           </div>
         </div>
-        <div className="flex flex-wrap gap-3 items-center">
+        
+        {isVerified ? (
+          <div className="flex items-center gap-2 text-green-700 bg-green-50 px-3 py-2 rounded-md">
+            <CheckCircle2 className="h-4 w-4" />
+            <span className="text-sm font-medium">Email verified: {verificationData?.email}</span>
+          </div>
+        ) : (
           <Button
             type="button"
-            onClick={handleRequestOtp}
-            disabled={otp.loading || !submittedEmail || !submittedName}
+            variant="outline"
+            onClick={handleSendVerification}
+            disabled={sendingOtp || !submittedEmail || !submittedName}
           >
-            {otp.loading ? "Sending..." : "Send code"}
+            {sendingOtp ? "Sending..." : "Verify email"}
           </Button>
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="6-digit OTP"
-              value={otpCode}
-              onChange={(event) => setOtpCode(event.target.value)}
-            />
-            <Button
-              type="button"
-              onClick={handleVerifyOtp}
-              disabled={otp.verifying || otp.status !== "sent" || !otpCode}
-            >
-              {otp.verifying ? "Verifying..." : "Verify"}
-            </Button>
-          </div>
-          {otp.status === "verified" && (
-            <span className="text-sm text-green-700">Email verified</span>
-          )}
-          {otp.error && <span className="text-sm text-red-600">{otp.error}</span>}
-        </div>
+        )}
       </div>
 
       <div className="flex justify-end">
-        <Button type="submit" disabled={isSubmitting || otp.status !== "verified"}>
+        <Button type="submit" disabled={isSubmitting || !isVerified}>
           {isSubmitting ? "Submitting..." : "Submit project"}
         </Button>
       </div>
