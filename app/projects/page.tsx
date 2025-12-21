@@ -44,21 +44,22 @@ function normalizeImageUrl(image?: string | null) {
 export default async function ProjectsPage({
   searchParams,
 }: {
-  searchParams?: { q?: string | string[]; page?: string; tags?: string | string[] };
+  searchParams?: Promise<{ q?: string | string[]; page?: string; tags?: string | string[] }>;
 }) {
-  const searchQuery = Array.isArray(searchParams?.q)
-    ? searchParams?.q.join(" ")
-    : searchParams?.q
-    ? searchParams.q.toString()
+  const resolvedSearchParams = await searchParams;
+  const searchQuery = Array.isArray(resolvedSearchParams?.q)
+    ? resolvedSearchParams?.q.join(" ")
+    : resolvedSearchParams?.q
+    ? resolvedSearchParams.q.toString()
     : "";
-  const rawTags = searchParams?.tags;
+  const rawTags = resolvedSearchParams?.tags;
   const selectedTags = Array.isArray(rawTags)
     ? rawTags.flatMap((tag) => tag.split(",")).filter(Boolean)
     : rawTags
     ? rawTags.split(",").filter(Boolean)
     : [];
 
-  const page = Number(searchParams?.page || 1);
+  const page = Number(resolvedSearchParams?.page || 1);
   const limit = 20;
   const offset = page > 1 ? (page - 1) * limit : 0;
   const slug = departmentSlugFromCode(DEPARTMENT_CODE);
