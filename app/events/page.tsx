@@ -1,43 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, ArrowRight, MapPin } from "lucide-react";
-import { getPublicApiUrl } from "@/lib/env";
+import { Calendar, ArrowRight, Clock } from "lucide-react";
 import { useDepartment, useDepartmentEvents } from "@/hooks/use-department";
 import { Skeleton } from "@/components/ui/skeleton";
-
-type GlobalEventItem = {
-  uuid: string;
-  title: string;
-  description?: string | null;
-  eventType?: string | null;
-  eventStartDate?: string | null;
-  eventEndDate?: string | null;
-};
-
-const formatEventDate = (value?: string | null) => {
-  if (!value) return "TBD";
-  try {
-    return new Date(value).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "2-digit",
-    });
-  } catch {
-    return value;
-  }
-};
-
-const formatEventRange = (start?: string | null, end?: string | null) => {
-  if (!start && !end) return "Dates to be announced";
-  const from = formatEventDate(start);
-  if (!end) return from;
-  const to = formatEventDate(end);
-  return from === to ? from : `${from} — ${to}`;
-};
 
 const sanitizeText = (value?: string | null) =>
   value ? value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "";
@@ -49,26 +18,45 @@ const truncateText = (value?: string | null, limit = 120) => {
   return `${text.slice(0, limit - 1)}…`;
 };
 
-const humanizeEventType = (value?: string | null) =>
-  value
-    ? value
-        .split(/[_\s]+/)
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-        .join(" ")
-    : "";
-
 export default function EventsPage() {
   const { data: dept } = useDepartment();
   const { data, loading, error } = useDepartmentEvents({
     ordering: "-eventStartDate",
-    limit: 20,
+    limit: 50,
     departmentUuid: dept?.uuid,
   });
 
-  const events = data?.results || [];
+  const allEvents = data?.results || [];
 
   const tcase = (s?: string) =>
     s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : "";
+
+  const isUpcoming = (s?: string | null, e?: string | null) => {
+    const now = new Date();
+    const ed = e ? new Date(e) : null;
+    const sd = s ? new Date(s) : null;
+    // Event is upcoming if end date is in the future OR if no end date, start date is in the future
+    if (ed && !Number.isNaN(ed.getTime())) {
+      return ed.getTime() >= now.getTime();
+    }
+    if (sd && !Number.isNaN(sd.getTime())) {
+      return sd.getTime() >= now.getTime();
+    }
+    return true; // If no dates, show it
+  };
+
+  const isPast = (s?: string | null, e?: string | null) => {
+    const now = new Date();
+    const ed = e ? new Date(e) : null;
+    if (ed && !Number.isNaN(ed.getTime())) {
+      return ed.getTime() < now.getTime();
+    }
+    const sd = s ? new Date(s) : null;
+    if (sd && !Number.isNaN(sd.getTime())) {
+      return sd.getTime() < now.getTime();
+    }
+    return false;
+  };
 
   const statusOf = (s?: string | null, e?: string | null) => {
     const now = new Date();
@@ -97,55 +85,9 @@ export default function EventsPage() {
     }
   };
 
-  const [globalEvents, setGlobalEvents] = useState<GlobalEventItem[]>([]);
-  const [globalLoading, setGlobalLoading] = useState(false);
-  const [globalError, setGlobalError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!dept?.uuid) {
-      setGlobalEvents([]);
-      setGlobalLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    const fetchGlobalEvents = async () => {
-      setGlobalLoading(true);
-      setGlobalError(null);
-      try {
-        const params = new URLSearchParams({
-          limit: "4",
-          department: dept.uuid,
-          ordering: "-eventStartDate",
-        });
-        const response = await fetch(
-          `${getPublicApiUrl("/api/v1/public/website-mod/global-events")}?${params.toString()}`,
-          {
-            headers: { Accept: "application/json" },
-            signal: controller.signal,
-          }
-        );
-        if (!response.ok) {
-          throw new Error(`Failed to load campus events (${response.status})`);
-        }
-        const data = await response.json();
-        const items = Array.isArray(data?.results) ? data.results : [];
-        setGlobalEvents(items);
-      } catch (error) {
-        if ((error as Error).name === "AbortError") return;
-        setGlobalError(
-          error instanceof Error
-            ? error.message
-            : "Unable to load campus events right now."
-        );
-      } finally {
-        setGlobalLoading(false);
-      }
-    };
-
-    void fetchGlobalEvents();
-    return () => controller.abort();
-  }, [dept?.uuid]);
+  // Filter events into upcoming and past
+  const upcomingEvents = allEvents.filter((e) => isUpcoming(e.eventStartDate, e.eventEndDate));
+  const pastEvents = allEvents.filter((e) => isPast(e.eventStartDate, e.eventEndDate));
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
@@ -164,8 +106,8 @@ export default function EventsPage() {
           </p>
         </div>
 
-        {/* Events Grid */}
-        <div className="mb-20">
+        {/* Upcoming Events Grid */}
+        <div className="mb-16">
           <div className="flex items-center justify-between mb-8">
             <h2 className="text-2xl font-semibold text-slate-900">Upcoming Events</h2>
             <div className="h-px flex-1 bg-gradient-to-r from-slate-200 to-transparent ml-6" />
@@ -193,17 +135,17 @@ export default function EventsPage() {
             </div>
           )}
 
-          {!loading && !error && events.length === 0 && (
+          {!loading && !error && upcomingEvents.length === 0 && (
             <div className="text-center py-16 bg-slate-50 rounded-2xl border border-slate-100">
               <Calendar className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-              <p className="text-slate-600 font-medium">No events scheduled</p>
-              <p className="text-slate-400 text-sm mt-1">Check back soon for upcoming events</p>
+              <p className="text-slate-600 font-medium">No upcoming events</p>
+              <p className="text-slate-400 text-sm mt-1">Check back soon for new events</p>
             </div>
           )}
 
-          {!loading && !error && events.length > 0 && (
+          {!loading && !error && upcomingEvents.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {events.map((event) => {
+              {upcomingEvents.map((event) => {
                 const status = statusOf(event.eventStartDate, event.eventEndDate);
                 return (
                   <Card
@@ -259,9 +201,12 @@ export default function EventsPage() {
                       <Button
                         variant="outline"
                         className="w-full group/btn hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all duration-200"
+                        asChild
                       >
-                        View Details
-                        <ArrowRight className="h-4 w-4 ml-2 transition-transform group-hover/btn:translate-x-1" />
+                        <Link href={`/events/${event.uuid}`}>
+                          View Details
+                          <ArrowRight className="h-4 w-4 ml-2 transition-transform group-hover/btn:translate-x-1" />
+                        </Link>
                       </Button>
                     </div>
                   </Card>
@@ -271,81 +216,69 @@ export default function EventsPage() {
           )}
         </div>
 
-        {/* Campus-wide Events */}
-        <div className="border-t border-slate-100 pt-16">
-          <div className="text-center mb-12">
-            <Badge variant="outline" className="mb-4 px-4 py-1.5 text-xs font-medium tracking-wide text-blue-600 border-blue-200 bg-blue-50">
-              Campus Highlights
-            </Badge>
-            <h2 className="text-3xl font-bold text-slate-900 mb-3">
-              Global events tied to {dept?.shortName || "your department"}
-            </h2>
-            <p className="text-slate-500 max-w-xl mx-auto">
-              Events that bring the whole campus together — filtered for your department so you know what's nearby.
-            </p>
-          </div>
+        {/* Past Events Section */}
+        {!loading && !error && pastEvents.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-8">
+              <h2 className="text-2xl font-semibold text-slate-900 flex items-center gap-2">
+                <Clock className="h-5 w-5 text-slate-400" />
+                Past Events
+              </h2>
+              <div className="h-px flex-1 bg-gradient-to-r from-slate-200 to-transparent ml-6" />
+            </div>
 
-          {globalLoading ? (
-            <div className="grid gap-6 md:grid-cols-2 max-w-4xl mx-auto">
-              {[...Array(2)].map((_, index) => (
-                <div key={index} className="h-48 animate-pulse rounded-2xl bg-slate-100" />
-              ))}
-            </div>
-          ) : globalError ? (
-            <div className="text-center py-12 bg-red-50 rounded-2xl max-w-2xl mx-auto">
-              <p className="text-red-600">{globalError}</p>
-            </div>
-          ) : globalEvents.length === 0 ? (
-            <div className="text-center py-16 bg-slate-50 rounded-2xl border border-slate-100 max-w-2xl mx-auto">
-              <MapPin className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-              <p className="text-slate-600 font-medium">No campus-wide events</p>
-              <p className="text-slate-400 text-sm mt-1">
-                No campus-wide events are linked to this department right now.
-              </p>
-            </div>
-          ) : (
-            <div className="grid gap-6 md:grid-cols-2 max-w-4xl mx-auto">
-              {globalEvents.map((event) => (
-                <div
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {pastEvents.map((event) => (
+                <Card
                   key={event.uuid}
-                  className="group relative rounded-2xl border border-slate-100 bg-white p-6 hover:shadow-lg hover:shadow-slate-100/50 hover:border-slate-200 transition-all duration-300"
+                  className="group overflow-hidden bg-white border-slate-100 hover:border-slate-200 hover:shadow-lg transition-all duration-300 rounded-xl opacity-80 hover:opacity-100"
                 >
-                  <div className="flex items-start justify-between gap-4 mb-4">
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-lg font-semibold text-slate-900 group-hover:text-blue-600 transition-colors line-clamp-1">
-                        {event.title}
-                      </h3>
-                      <p className="text-sm text-blue-600 font-medium mt-1">
-                        {formatEventRange(event.eventStartDate, event.eventEndDate)}
-                      </p>
-                    </div>
-                    {event.eventType && (
-                      <Badge variant="secondary" className="shrink-0 bg-slate-100 text-slate-600 hover:bg-slate-100">
-                        {humanizeEventType(event.eventType)}
-                      </Badge>
+                  <div className="aspect-[16/9] bg-gradient-to-br from-slate-100 to-slate-50 overflow-hidden relative">
+                    {event.thumbnail ? (
+                      <img
+                        src={event.thumbnail}
+                        alt={event.title}
+                        className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <Calendar className="h-12 w-12 text-slate-200" />
+                      </div>
                     )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
+                    <div className="absolute bottom-3 left-3">
+                      <Badge className="px-2 py-0.5 text-xs font-medium bg-slate-500 hover:bg-slate-500 text-white border-0">
+                        Finished
+                      </Badge>
+                    </div>
                   </div>
-                  <p className="text-sm text-slate-500 leading-relaxed line-clamp-3">
-                    {truncateText(event.description, 140)}
-                  </p>
-                </div>
+
+                  <div className="p-4">
+                    <h3 className="text-base font-semibold text-slate-700 mb-1 line-clamp-1 group-hover:text-slate-900 transition-colors">
+                      {event.title}
+                    </h3>
+                    <p className="text-slate-400 text-xs mb-3">
+                      {fmt(event.eventStartDate)}
+                      {event.eventEndDate && event.eventStartDate !== event.eventEndDate && ` — ${fmt(event.eventEndDate)}`}
+                    </p>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full text-slate-500 hover:text-slate-900"
+                      asChild
+                    >
+                      <Link href={`/events/${event.uuid}`}>
+                        View Details
+                        <ArrowRight className="h-3 w-3 ml-1" />
+                      </Link>
+                    </Button>
+                  </div>
+                </Card>
               ))}
             </div>
-          )}
-
-          <div className="text-center mt-10">
-            <Button
-              variant="outline"
-              className="px-8 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all duration-200"
-              asChild
-            >
-              <a href="https://tcioe.edu.np/events" target="_blank" rel="noreferrer">
-                Browse all campus events
-                <ArrowRight className="h-4 w-4 ml-2" />
-              </a>
-            </Button>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
